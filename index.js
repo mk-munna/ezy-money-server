@@ -25,6 +25,7 @@ async function run() {
         // await client.connect();
 
         const UserCollection = client.db('EzyMoney').collection('Users');
+        const TransactionCollection = client.db('EzyMoney').collection('Transactions');
 
         const verifyToken = (req, res, next) => {
             const authHeader = req.headers.authorization;
@@ -52,12 +53,12 @@ async function run() {
             console.log(mobile, pin);
             const user = await UserCollection.findOne({ $or: [{ mobile }, { email }] });
             if (!user) {
-                return
+                return res.send({ message: '❌ No account Match' })
             }
             if (!await bcrypt.compare(pin, user.pin)) return res.send({ message: '❌ Invalid PIN' });
 
             const token = jwt.sign({ id: user._id, role: user.role }, process.env.ACCESS_TOKEN_SECRET, { expiresIn: '365days' });
-            res.send({ token, Number: user.mobile, message: "✅ successfully logged in" });
+            res.send({ token, number: user.mobile, message: "✅ successfully logged in" });
         });
         // register
         app.post('/sign-up', async (req, res) => {
@@ -70,6 +71,50 @@ async function run() {
             const token = jwt.sign({ mobile, role }, process.env.ACCESS_TOKEN_SECRET, { expiresIn: '365days' });
             const result = await UserCollection.insertOne(user);
             res.send({ result, token, message: 'Registration successful, waiting for admin approval.' });
+        });
+
+
+        // balance
+        app.get('/balance/:user', verifyToken, async (req, res) => {
+            const mobile = req.params.user
+            const email = mobile
+            console.log(mobile);
+            const user = await UserCollection.findOne({ $or: [{ mobile }, { email }] });
+            // console.log(user);
+            res.send({ balance: user.balance, name: user.name, email: user.email, mobile: mobile, status: user.status, role: user.role });
+        });
+
+
+
+        //all transactions
+
+        // send money
+        app.post('/send-money', verifyToken, async (req, res) => {
+            const { amount, to, pin, from } = req.body;
+            console.log(from, to, pin, amount);
+            if(from=== to) return res.send({message: '❌You can not send money to yourself'})
+            const user = await UserCollection.findOne({ $or: [{ mobile: from }, { email: from }] });
+            console.log(user);
+            // console.log("hello");
+            if (!await bcrypt.compare(pin, user.pin)) return res.send({ message: '❌ Invalid PIN' });
+            if (user.balance < amount) return res.status(400).send('Insufficient balance');
+            
+            const toUser = await UserCollection.findOne({ mobile: to });
+            if (!toUser) return res.send({message : '❌ No EzyMoney Account with this Number'});
+            
+            const amountNum = parseInt(amount);
+            const fee = amountNum > 100 ? 5 : 0;
+            const newAmount = amountNum + fee;
+            // console.log(newAmount);
+            await UserCollection.updateOne({ _id: user._id }, { $inc: { balance: -newAmount } });
+            // console.log("hello");
+            await UserCollection.updateOne({ mobile: to }, { $inc: { balance: amountNum } });
+            await UserCollection.updateOne({ role: "admin" }, { $inc: { balance: fee } });
+
+            const transaction = { from, to, amount: amountNum , type: 'send money', date: new Date() };
+            await TransactionCollection.insertOne(transaction);
+
+            res.send({message :'✅Transaction successful'});
         });
 
 
