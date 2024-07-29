@@ -92,17 +92,19 @@ async function run() {
         app.post('/send-money', verifyToken, async (req, res) => {
             const { amount, to, pin, from } = req.body;
             console.log(from, to, pin, amount);
-            if(from=== to) return res.send({message: '❌You can not send money to yourself'})
+            const amountNum = parseInt(amount);
+            if (amountNum < 50) return res.send({message: '❌ Amount should be above 50 tk'});
+            if(from=== to) return res.send({message: '❌ You can not send money to yourself'})
             const user = await UserCollection.findOne({ $or: [{ mobile: from }, { email: from }] });
             console.log(user);
             // console.log("hello");
             if (!await bcrypt.compare(pin, user.pin)) return res.send({ message: '❌ Invalid PIN' });
-            if (user.balance < amount) return res.status(400).send('Insufficient balance');
+            if (user.balance < amount) return res.send({message: 'Insufficient balance'});
             
             const toUser = await UserCollection.findOne({ mobile: to });
             if (!toUser) return res.send({message : '❌ No EzyMoney Account with this Number'});
             
-            const amountNum = parseInt(amount);
+            
             const fee = amountNum > 100 ? 5 : 0;
             const newAmount = amountNum + fee;
             // console.log(newAmount);
@@ -116,6 +118,86 @@ async function run() {
 
             res.send({message :'✅Transaction successful'});
         });
+
+        // Cash Out
+        app.post('/cash-out', verifyToken, async (req, res) => {
+            const { amount, to, pin, from } = req.body;
+            console.log(from, to, pin, amount);
+            const amountNum = parseFloat(amount);
+            if (amountNum < 50) return res.send({ message: '❌ Amount should be above 50 tk' });
+            if (from === to) return res.send({ message: '❌ Enter an agent number' });
+
+            const user = await UserCollection.findOne({ $or: [{ mobile: from }, { email: from }] });
+            if (!user) return res.send({ message: '❌ User not found' });
+
+            if (!await bcrypt.compare(pin, user.pin)) return res.send({ message: '❌ Invalid PIN' });
+
+           
+            const fee = amountNum * 0.015;
+            const totalDeduction = amountNum + fee;
+
+            if (user.balance < totalDeduction) return res.send({message: '❌ Insufficient balance'});
+
+            const toUser = await UserCollection.findOne({ mobile: to });
+            if (!toUser) return res.send({ message: '❌ No EzyMoney Account with this Number' });
+            if (toUser.role !== "agent") return res.send({ message: '❌ Enter a agent number' });
+
+                await UserCollection.updateOne({ _id: user._id }, { $inc: { balance: -totalDeduction } });
+            await UserCollection.updateOne({ mobile: to }, { $inc: { balance: totalDeduction } });
+
+                const transaction = { from, to, amount: amountNum, fee, type: 'cash out', date: new Date() };
+            await TransactionCollection.insertOne(transaction);
+            
+                res.send({ message: '✅ Cash-out successful' });
+        });
+
+
+        // // Cash Out
+        // app.post('/cash-out', verifyToken, async (req, res) => {
+        //     const { amount, to, pin, from } = req.body;
+        //     console.log(from, to, pin, amount);
+
+        //     if (from === to) return res.send({ message: '❌ Enter a agent number' });
+
+        //     const user = await UserCollection.findOne({ $or: [{ mobile: from }, { email: from }] });
+        //     if (!user) return res.send({ message: '❌ User not found' });
+
+        //     if (!await bcrypt.compare(pin, user.pin)) return res.send({ message: '❌ Invalid PIN' });
+
+        //     const amountNum = parseFloat(amount);
+        //     const fee = amountNum * 0.015;
+        //     const totalDeduction = amountNum + fee;
+
+        //     if (user.balance < totalDeduction) return res.status(400).send('❌ Insufficient balance');
+
+        //     const toUser = await UserCollection.findOne({ mobile: to });
+        //     if (!toUser) return res.send({ message: '❌ No EzyMoney Account with this Number' });
+        //     if (toUser.role !== "agent") return res.send({ message: '❌ Enter a agent number' });
+
+        //     // Perform the balance updates in a transaction to ensure atomicity
+        //     const session = await UserCollection.startSession();
+        //     session.startTransaction();
+
+        //     try {
+        //         await UserCollection.updateOne({ _id: user._id }, { $inc: { balance: -totalDeduction } }, { session });
+        //         await UserCollection.updateOne({ mobile: to }, { $inc: { balance: amountNum + fee } }, { session });
+        //         await UserCollection.updateOne({ role: "admin" }, { $inc: { balance: fee } }, { session });
+
+        //         const transaction = { from, to, amount: amountNum, fee, type: 'cash out', date: new Date() };
+        //         await TransactionCollection.insertOne(transaction, { session });
+
+        //         await session.commitTransaction();
+        //         session.endSession();
+
+        //         res.send({ message: '✅ Cash-out successful' });
+        //     } catch (error) {
+        //         await session.abortTransaction();
+        //         session.endSession();
+        //         console.error(error);
+        //         res.status(500).send('❌ Transaction failed');
+        //     }
+        // });
+
 
 
         console.log("Pinged your deployment. You successfully connected to MongoDB!");
